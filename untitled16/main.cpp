@@ -1,60 +1,74 @@
-// Pines de los pulsadores
-int startButtonPin = 2;  // Pulsador para iniciar toma de datos
-int stopButtonPin = 3;   // Pulsador para detener toma de datos
-int sensorPin = A0;      // Pin generador de funciones
-bool collectingData = false; //controlar el estado de los pulsadores
-// Puntero para almacenar datos dinámicamente
+int startButtonPin = 2;  // Pin del pulsador para iniciar la toma de datos
+int stopButtonPin = 4;   // Pin del pulsador para detener la toma de datos
+int sensorPin = A0;      // Pin analógico para recibir datos del generador de funciones
+bool collectingData = false;
+bool startButtonPressed = false;
+bool stopButtonPressed = false;
 int* dataArray = nullptr;
-int dataSize = 0;// Cantidad de datos almacenados actualmente
-// Variables para la amplitud y frecuencia
+int dataSize = 0;
 int maxValue = 0;
-int minValue = 1023; // El valor máximo de una entrada analógica es 1023
-unsigned long lastCrossingTime = 0; // Tiempo del último cruce
-unsigned long period = 0;  // Período de la señal
-
+int minValue = 1023;
+unsigned long lastCrossingTime = 0;
+unsigned long period = 0;
 void setup() {
     pinMode(startButtonPin, INPUT);
     pinMode(stopButtonPin, INPUT);
     Serial.begin(9600);
 }
-
 void loop() {
-    handleButtons();
+    handleButtons();  // Maneja el estado de los botones
     if (collectingData) {
-        collectData();
+        collectData();  // Captura los datos si la colección está activa
     }
 }
+
 // Función para manejar los botones
 void handleButtons() {
-    int startButtonState = digitalRead(startButtonPin);
-    int stopButtonState = digitalRead(stopButtonPin);
+    bool currentStartButtonState = digitalRead(startButtonPin);
+    bool currentStopButtonState = digitalRead(stopButtonPin);
 
-    if (startButtonState == HIGH && !collectingData) {
-        startDataCollection();
+    // Detectar el cambio de estado del botón de inicio
+    if (currentStartButtonState == HIGH && !startButtonPressed) {
+        startButtonPressed = true;
+        if (!collectingData) {
+            startDataCollection();
+        }
+    } else if (currentStartButtonState == LOW) {
+        startButtonPressed = false;
     }
 
-    if (stopButtonState == HIGH && collectingData) {
-        stopDataCollection();
+    // Detectar el cambio de estado del botón de parada
+    if (currentStopButtonState == HIGH && !stopButtonPressed) {
+        stopButtonPressed = true;
+        if (collectingData) {
+            stopDataCollection();
+        }
+    } else if (currentStopButtonState == LOW) {
+        stopButtonPressed = false;
     }
 }
 
 // Función para iniciar la toma de datos
 void startDataCollection() {
     collectingData = true;
-    dataSize = 0;          // Reiniciar el tamaño de datos almacenados
-    maxValue = 0;          // Reiniciar valor máximo
-    minValue = 1023;       // Reiniciar valor mínimo
-    lastCrossingTime = 0;  // Reiniciar tiempo del último cruce
-    period = 0;            // Reiniciar período
+    dataSize = 0;
+    maxValue = 0;
+    minValue = 1023;
+    lastCrossingTime = 0;
+    period = 0;
+    Serial.println("Iniciando captura de datos...");
 }
 
 // Función para detener la toma de datos
 void stopDataCollection() {
     collectingData = false;
+    Serial.println("Captura de datos detenida.");
+
     int amplitude = calculateAmplitude();
+    Serial.print("Amplitud: ");
     Serial.println(amplitude);
+
     float frequency = calculateFrequency();
-    /*
     if (frequency > 0) {
         Serial.print("Frecuencia: ");
         Serial.print(frequency);
@@ -62,33 +76,32 @@ void stopDataCollection() {
     } else {
         Serial.println("No se pudo determinar la frecuencia.");
     }
-    */ //pruebas para la frecuencia
-    // Liberar la memoria asignada
-    free(dataArray);
+
+    identifySignalType();  // Identificar el tipo de señal
+
+    free(dataArray);  // Liberar la memoria asignada
     dataArray = nullptr; // Evitar que el puntero apunte a una memoria liberada
 }
 
 // Función para capturar los datos
 void collectData() {
-    int sensorValue = analogRead(sensorPin); // Leer el valor del sensor
-    // Actualizar valores máximo y mínimo
+    int sensorValue = analogRead(sensorPin);
     if (sensorValue > maxValue) maxValue = sensorValue;
     if (sensorValue < minValue) minValue = sensorValue;
-    // Detectar cruce por el valor medio
     detectZeroCrossing(sensorValue);
-    // Almacenar el nuevo dato en memoria dinámica
-    storeData(sensorValue);// Variables para controlar el estado de los pulsadores
-    delay(10);// Pequeño retraso para no sobrecargar el buffer
+    storeData(sensorValue);
+    delay(10);  // Ajustar el delay según la frecuencia de la señal
 }
 
 // Función para detectar cruces por el valor medio y calcular el periodo
 void detectZeroCrossing(int sensorValue) {
     int threshold = (maxValue + minValue) / 2;
+
     if (sensorValue >= threshold && lastCrossingTime == 0) {
-        lastCrossingTime = millis(); // Primer cruce
+        lastCrossingTime = millis();
     } else if (sensorValue >= threshold && millis() - lastCrossingTime > 10) {
         unsigned long currentTime = millis();
-        period = currentTime - lastCrossingTime; // Calcular el período
+        period = currentTime - lastCrossingTime;
         lastCrossingTime = currentTime;
     }
 }
@@ -99,22 +112,80 @@ void storeData(int sensorValue) {
 
     if (tempArray != nullptr) {
         dataArray = tempArray;
-        dataArray[dataSize] = sensorValue; // Almacenar el nuevo dato
-        dataSize++; // Incrementar el tamaño del arreglo
+        dataArray[dataSize] = sensorValue;
+        dataSize++;
     } else {
         Serial.println("Error al asignar memoria.");
         collectingData = false;
     }
 }
+
 // Función para calcular la amplitud
 int calculateAmplitude() {
     return (maxValue - minValue) / 2;
 }
+
 // Función para calcular la frecuencia
 float calculateFrequency() {
     if (period > 0) {
-        return 1000.0 / period; // Convertir a Hz
+        return 1000.0 / period;
     }
     return 0;
 }
 
+// Función para identificar el tipo de señal
+void identifySignalType() {
+    int sinusoidalCount = 0;
+    int squareCount = 0;
+    int triangularCount = 0;
+
+    for (int i = 0; i < dataSize; i++) {
+        if (isSineWave(dataArray, i)) {
+            sinusoidalCount++;
+        } else if (isSquareWave(dataArray, i)) {
+            squareCount++;
+        } else if (isTriangularWave(dataArray, i)) {
+            triangularCount++;
+        }
+    }
+
+    // Identificar la onda que aparece más veces
+    if (sinusoidalCount > squareCount && sinusoidalCount > triangularCount) {
+        Serial.println("La señal predominante es sinusoidal.");
+    } else if (squareCount > sinusoidalCount && squareCount > triangularCount) {
+        Serial.println("La señal predominante es digital (cuadrada).");
+    } else if (triangularCount > sinusoidalCount && triangularCount > squareCount) {
+        Serial.println("La señal predominante es triangular.");
+    } else {
+        Serial.println("No se pudo identificar la señal predominante.");
+    }
+}
+
+// Función para comprobar si la señal es sinusoidal
+bool isSineWave(int* array, int index) {
+    if (index < 2) return false;
+    // Transiciones suaves entre valores sucesivos
+    return abs(array[index] - array[index - 1]) < (maxValue - minValue) / 10;
+}
+
+// Función para comprobar si la señal es digital (cuadrada)
+bool isSquareWave(int* array, int index) {
+    if (index < 2) return false;
+    int thresholdHigh = maxValue - (maxValue - minValue) / 4;
+    int thresholdLow = minValue + (maxValue - minValue) / 4;
+
+    // La señal cuadrada cambia bruscamente entre valores altos y bajos
+    return (array[index] >= thresholdHigh && array[index - 1] <= thresholdLow) ||
+           (array[index] <= thresholdLow && array[index - 1] >= thresholdHigh);
+}
+
+// Función para comprobar si la señal es triangular
+bool isTriangularWave(int* array, int index) {
+    if (index < 2) return false;
+
+    // La señal triangular tiene pendientes lineales en una dirección (creciente o decreciente)
+    bool ascending = array[index] > array[index - 1] && array[index - 1] > array[index - 2];
+    bool descending = array[index] < array[index - 1] && array[index - 1] < array[index - 2];
+
+    return ascending || descending;
+}
