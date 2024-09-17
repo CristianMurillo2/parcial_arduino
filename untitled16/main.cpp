@@ -1,6 +1,6 @@
 #include <LiquidCrystal.h>
 
-const int startButtonPin = 6;
+const int startButtonPin = 8;
 const int stopButtonPin = 7;
 const int sensorPin = A0;
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
@@ -8,34 +8,15 @@ bool collectingData = false;
 bool startButtonPressed = false;
 bool stopButtonPressed = false;
 int* dataArray = nullptr;
-int dataSize = 0;
-int maxValue = 0;
-int minValue = 1023;
+unsigned int dataSize = 0;
+unsigned int maxValue = 0;
+unsigned int minValue = 1023;
 unsigned long lastCrossingTime = 0;
 unsigned long period = 0;
-int amplitude = 0;
+unsigned int amplitude = 0;
 float frequency = 0;
 String signalType = "No id.";
-void setup() {
-    pinMode(startButtonPin, INPUT_PULLUP);
-    pinMode(stopButtonPin, INPUT_PULLUP);
-    lcd.begin(16, 2);  // Inicializar la pantalla LCD de 16x2
-    lcd.clear();
-    lcd.print("Esperando...");
-    Serial.begin(9600);
-}
-void loop() {
-    handleButtons();
-    if (collectingData) {
-        collectData();
-    } else {
-        if (dataSize > 0) {
-            displayResults();
-            delay(2000);
-            resetState();
-        }
-    }
-}
+
 void handleButtons() {
     bool currentStartButtonState = digitalRead(startButtonPin);
     bool currentStopButtonState = digitalRead(stopButtonPin);
@@ -155,17 +136,15 @@ void displayResults() {
     lcd.print(frequency);
     lcd.print(" Hz");
 
-    delay(2000); // Espera 2 segundos
+    delay(2000);
 
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("Tipo: ");
     lcd.print(signalType);
-
-    delay(2000); // Espera 2 segundos
+    delay(2000);
 }
 bool isSineWave(int diff1, int diff2) {
-    // Cambios suaves en ambas direcciones, y valores absolutos similares
     int threshold = (maxValue - minValue) / 10;
     return (abs(diff1) < threshold && abs(diff2) < threshold && (diff1 * diff2) < 0);
 }
@@ -175,7 +154,6 @@ bool isSquareWave(int current, int previous) {
     return (current >= thresholdHigh && previous <= thresholdLow) || (current <= thresholdLow && previous >= thresholdHigh);
 }
 bool isTriangularWave(int diff1, int diff2) {
-    // Cambios constantes en la misma dirección y patrones lineales
     return (diff1 > 0 && diff2 > 0) || (diff1 < 0 && diff2 < 0);
 }
 void resetState() {
@@ -190,4 +168,24 @@ void resetState() {
     signalType = "No id.";
     lcd.clear();
     lcd.print("Esperando...");
+}
+void setup() {
+    pinMode(startButtonPin, INPUT_PULLUP);
+    pinMode(stopButtonPin, INPUT_PULLUP);
+    lcd.begin(16, 2);
+    lcd.clear();
+    lcd.print("Esperando...");
+    Serial.begin(9600);
+}
+void loop() {
+    handleButtons();
+    if (collectingData) {
+        collectData();
+    } else {
+        if (dataSize > 0) {
+            displayResults();
+            delay(2000);
+            resetState();
+        }
+    }
 }
