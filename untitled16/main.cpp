@@ -8,12 +8,12 @@ bool collectingData = false;
 bool startButtonPressed = false;
 bool stopButtonPressed = false;
 int* dataArray = nullptr;
-unsigned int dataSize = 0;
-unsigned int maxValue = 0;
-unsigned int minValue = 1023;
+int dataSize = 0;
+int maxValue = 0;
+int minValue = 1023;
 unsigned long lastCrossingTime = 0;
 unsigned long period = 0;
-unsigned int amplitude = 0;
+int amplitude = 0;
 float frequency = 0;
 String signalType = "No id.";
 
