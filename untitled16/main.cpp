@@ -1,6 +1,9 @@
-int startButtonPin = 2;  // Pin del pulsador para iniciar la toma de datos
-int stopButtonPin = 4;   // Pin del pulsador para detener la toma de datos
-int sensorPin = A0;      // Pin analógico para recibir datos del generador de funciones
+#include <LiquidCrystal.h>
+
+const int startButtonPin = 6;
+const int stopButtonPin = 7;
+const int sensorPin = A0;
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 bool collectingData = false;
 bool startButtonPressed = false;
 bool stopButtonPressed = false;
@@ -10,45 +13,49 @@ int maxValue = 0;
 int minValue = 1023;
 unsigned long lastCrossingTime = 0;
 unsigned long period = 0;
+int amplitude = 0;
+float frequency = 0;
+String signalType = "No id.";
 void setup() {
-    pinMode(startButtonPin, INPUT);
-    pinMode(stopButtonPin, INPUT);
+    pinMode(startButtonPin, INPUT_PULLUP);
+    pinMode(stopButtonPin, INPUT_PULLUP);
+    lcd.begin(16, 2);  // Inicializar la pantalla LCD de 16x2
+    lcd.clear();
+    lcd.print("Esperando...");
     Serial.begin(9600);
 }
 void loop() {
-    handleButtons();  // Maneja el estado de los botones
+    handleButtons();
     if (collectingData) {
-        collectData();  // Captura los datos si la colección está activa
+        collectData();
+    } else {
+        if (dataSize > 0) {
+            displayResults();
+            delay(2000);
+            resetState();
+        }
     }
 }
-
-// Función para manejar los botones
 void handleButtons() {
     bool currentStartButtonState = digitalRead(startButtonPin);
     bool currentStopButtonState = digitalRead(stopButtonPin);
-
-    // Detectar el cambio de estado del botón de inicio
-    if (currentStartButtonState == HIGH && !startButtonPressed) {
+    if (currentStartButtonState == LOW && !startButtonPressed) {
         startButtonPressed = true;
         if (!collectingData) {
             startDataCollection();
         }
-    } else if (currentStartButtonState == LOW) {
+    } else if (currentStartButtonState == HIGH) {
         startButtonPressed = false;
     }
-
-    // Detectar el cambio de estado del botón de parada
-    if (currentStopButtonState == HIGH && !stopButtonPressed) {
+    if (currentStopButtonState == LOW && !stopButtonPressed) {
         stopButtonPressed = true;
         if (collectingData) {
             stopDataCollection();
         }
-    } else if (currentStopButtonState == LOW) {
+    } else if (currentStopButtonState == HIGH) {
         stopButtonPressed = false;
     }
 }
-
-// Función para iniciar la toma de datos
 void startDataCollection() {
     collectingData = true;
     dataSize = 0;
@@ -56,44 +63,29 @@ void startDataCollection() {
     minValue = 1023;
     lastCrossingTime = 0;
     period = 0;
+    lcd.clear();
+    lcd.print("Capturando...");
     Serial.println("Iniciando captura de datos...");
 }
-
-// Función para detener la toma de datos
 void stopDataCollection() {
     collectingData = false;
+    lcd.clear();
+    lcd.print("Datos capturados");
     Serial.println("Captura de datos detenida.");
-
-    int amplitude = calculateAmplitude();
-    Serial.print("Amplitud: ");
-    Serial.println(amplitude);
-
-    float frequency = calculateFrequency();
-    if (frequency > 0) {
-        Serial.print("Frecuencia: ");
-        Serial.print(frequency);
-        Serial.println(" Hz");
-    } else {
-        Serial.println("No se pudo determinar la frecuencia.");
-    }
-
-    identifySignalType();  // Identificar el tipo de señal
-
-    free(dataArray);  // Liberar la memoria asignada
-    dataArray = nullptr; // Evitar que el puntero apunte a una memoria liberada
+    amplitude = calculateAmplitude();
+    frequency = calculateFrequency();
+    signalType = identifySignalType();
+    free(dataArray);
+    dataArray = nullptr;
 }
-
-// Función para capturar los datos
 void collectData() {
     int sensorValue = analogRead(sensorPin);
     if (sensorValue > maxValue) maxValue = sensorValue;
     if (sensorValue < minValue) minValue = sensorValue;
     detectZeroCrossing(sensorValue);
     storeData(sensorValue);
-    delay(10);  // Ajustar el delay según la frecuencia de la señal
+    delay(10);
 }
-
-// Función para detectar cruces por el valor medio y calcular el periodo
 void detectZeroCrossing(int sensorValue) {
     int threshold = (maxValue + minValue) / 2;
 
@@ -105,11 +97,8 @@ void detectZeroCrossing(int sensorValue) {
         lastCrossingTime = currentTime;
     }
 }
-
-// Función para almacenar datos dinámicamente
 void storeData(int sensorValue) {
     int* tempArray = (int*) realloc(dataArray, (dataSize + 1) * sizeof(int));
-
     if (tempArray != nullptr) {
         dataArray = tempArray;
         dataArray[dataSize] = sensorValue;
@@ -119,73 +108,86 @@ void storeData(int sensorValue) {
         collectingData = false;
     }
 }
-
-// Función para calcular la amplitud
 int calculateAmplitude() {
     return (maxValue - minValue) / 2;
 }
-
-// Función para calcular la frecuencia
 float calculateFrequency() {
     if (period > 0) {
         return 1000.0 / period;
     }
     return 0;
 }
-
-// Función para identificar el tipo de señal
-void identifySignalType() {
+String identifySignalType() {
     int sinusoidalCount = 0;
     int squareCount = 0;
     int triangularCount = 0;
-
-    for (int i = 0; i < dataSize; i++) {
-        if (isSineWave(dataArray, i)) {
+    for (int i = 2; i < dataSize; i++) {
+        int diff1 = dataArray[i] - dataArray[i - 1];
+        int diff2 = dataArray[i - 1] - dataArray[i - 2];
+        if (isSineWave(diff1, diff2)) {
             sinusoidalCount++;
-        } else if (isSquareWave(dataArray, i)) {
+        }
+        else if (isSquareWave(dataArray[i], dataArray[i - 1])) {
             squareCount++;
-        } else if (isTriangularWave(dataArray, i)) {
+        }
+        else if (isTriangularWave(diff1, diff2)) {
             triangularCount++;
         }
     }
-
-    // Identificar la onda que aparece más veces
     if (sinusoidalCount > squareCount && sinusoidalCount > triangularCount) {
-        Serial.println("La señal predominante es sinusoidal.");
+        return "Sinusoidal";
     } else if (squareCount > sinusoidalCount && squareCount > triangularCount) {
-        Serial.println("La señal predominante es digital (cuadrada).");
+        return "Cuadrada";
     } else if (triangularCount > sinusoidalCount && triangularCount > squareCount) {
-        Serial.println("La señal predominante es triangular.");
+        return "Triangular";
     } else {
-        Serial.println("No se pudo identificar la señal predominante.");
+        return "No id.";
     }
 }
+void displayResults() {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Amp: ");
+    lcd.print(amplitude);
 
-// Función para comprobar si la señal es sinusoidal
-bool isSineWave(int* array, int index) {
-    if (index < 2) return false;
-    // Transiciones suaves entre valores sucesivos
-    return abs(array[index] - array[index - 1]) < (maxValue - minValue) / 10;
+    lcd.setCursor(0, 1);
+    lcd.print("Freq: ");
+    lcd.print(frequency);
+    lcd.print(" Hz");
+
+    delay(2000); // Espera 2 segundos
+
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Tipo: ");
+    lcd.print(signalType);
+
+    delay(2000); // Espera 2 segundos
 }
-
-// Función para comprobar si la señal es digital (cuadrada)
-bool isSquareWave(int* array, int index) {
-    if (index < 2) return false;
+bool isSineWave(int diff1, int diff2) {
+    // Cambios suaves en ambas direcciones, y valores absolutos similares
+    int threshold = (maxValue - minValue) / 10;
+    return (abs(diff1) < threshold && abs(diff2) < threshold && (diff1 * diff2) < 0);
+}
+bool isSquareWave(int current, int previous) {
     int thresholdHigh = maxValue - (maxValue - minValue) / 4;
     int thresholdLow = minValue + (maxValue - minValue) / 4;
-
-    // La señal cuadrada cambia bruscamente entre valores altos y bajos
-    return (array[index] >= thresholdHigh && array[index - 1] <= thresholdLow) ||
-           (array[index] <= thresholdLow && array[index - 1] >= thresholdHigh);
+    return (current >= thresholdHigh && previous <= thresholdLow) || (current <= thresholdLow && previous >= thresholdHigh);
 }
-
-// Función para comprobar si la señal es triangular
-bool isTriangularWave(int* array, int index) {
-    if (index < 2) return false;
-
-    // La señal triangular tiene pendientes lineales en una dirección (creciente o decreciente)
-    bool ascending = array[index] > array[index - 1] && array[index - 1] > array[index - 2];
-    bool descending = array[index] < array[index - 1] && array[index - 1] < array[index - 2];
-
-    return ascending || descending;
+bool isTriangularWave(int diff1, int diff2) {
+    // Cambios constantes en la misma dirección y patrones lineales
+    return (diff1 > 0 && diff2 > 0) || (diff1 < 0 && diff2 < 0);
+}
+void resetState() {
+    dataArray = nullptr;
+    dataSize = 0;
+    maxValue = 0;
+    minValue = 1023;
+    lastCrossingTime = 0;
+    period = 0;
+    amplitude = 0;
+    frequency = 0;
+    signalType = "No id.";
+    lcd.clear();
+    lcd.print("Esperando...");
 }
